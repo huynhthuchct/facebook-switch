@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "FB Account Switcher",
+  "version": "1.0.0",
+  "description": "Chuyển nhanh giữa các tài khoản Facebook mà không cần đăng xuất.",
+  "permissions": ["cookies", "storage", "tabs"],
+  "host_permissions": ["https://*.facebook.com/*"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_popup": "popup.html", "default_title": "FB Account Switcher" }
+}
