@@ -29,3 +29,12 @@ li .sub { color: #65676b; font-size: 11px; }
 li .icon { background: none; color: #65676b; padding: 2px 4px; font-weight: normal; }
 #msg { margin: 0 12px 10px; color: #65676b; min-height: 1em; }
 #msg.err { color: #d93025; }
+
+#tabs { display: flex; background: #e4e6eb; }
+#tabs button { flex: 1; border-radius: 0; background: none; color: #1c1e21; font-weight: normal; border-bottom: 3px solid transparent; }
+#tabs button.on { border-bottom-color: #1877f2; font-weight: 600; }
+[hidden] { display: none !important; }
+.sync { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.sync p { margin: 0; color: #65676b; font-size: 12px; }
+.sync p.err { color: #d93025; }
+.sync button.link { background: none; color: #1877f2; align-self: flex-end; padding: 0; font-weight: normal; }

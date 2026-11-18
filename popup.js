@@ -81,7 +81,7 @@ async function render() {
     list.append(li);
   }
 
-  document.querySelectorAll(".actions button").forEach((b) => (b.disabled = false));
+  document.querySelectorAll(".actions button, #tabs button").forEach((b) => (b.disabled = false));
 }
 
 $("#save").onclick = () =>
@@ -93,5 +93,15 @@ $("#save").onclick = () =>
 
 $("#add").onclick = () =>
   run(() => send("add"), "Đăng nhập tài khoản mới ở tab Facebook, rồi mở lại popup và bấm Lưu.");
+
+document.querySelectorAll("#tabs button").forEach((b) => {
+  b.addEventListener("click", () => {
+    const tab = b.dataset.tab;
+    document.querySelectorAll("#tabs button").forEach((x) => x.classList.toggle("on", x === b));
+    $("#tab-accounts").hidden = tab !== "accounts";
+    $("#tab-sync").hidden = tab !== "sync";
+    if (tab === "accounts") render().catch((e) => say(e.message, true)); // nạp lại sau khi đồng bộ
+  });
+});
 
 render().catch((e) => say(e.message, true));

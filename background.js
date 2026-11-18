@@ -2,6 +2,8 @@
 // Chuyển tài khoản = xoá cookie hiện tại ở trình duyệt (KHÔNG gọi logout lên server,
 // nên phiên đăng nhập vẫn còn hiệu lực) rồi nạp lại bộ cookie đã lưu.
 
+import * as sync from "./sync.js";
+
 const FB_DOMAIN = "facebook.com";
 
 async function getFbCookies() {
@@ -132,5 +134,39 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   Promise.resolve(fn(msg))
     .then((data) => sendResponse({ ok: true, data }))
     .catch((e) => sendResponse({ ok: false, error: e.message }));
+  return true;
+});
+
+// ---- Đồng bộ nền: sau mỗi thay đổi (gom 3 giây) và định kỳ 15 phút ----
+let syncTimer;
+const autoSync = () => sync.syncNow().catch(() => {}); // lỗi đã được lưu vào trạng thái đồng bộ
+chrome.alarms.get("sync-periodic", (a) => {
+  if (!a) chrome.alarms.create("sync-periodic", { delayInMinutes: 1, periodInMinutes: 15 });
+});
+chrome.alarms.onAlarm.addListener((a) => a.name === "sync-periodic" && autoSync());
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local" || !changes.accounts) return;
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(autoSync, 3000);
+});
+
+const syncHandlers = {
+  status: () => sync.status(),
+  probe: ({ url }) => sync.probe(url),
+  connect: ({ url, password, setupCode }) => sync.connect({ url, password, setupCode }),
+  unlock: ({ password }) => sync.unlock({ password }),
+  now: () => sync.syncNow(),
+  disconnect: () => sync.disconnect()
+};
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (sender.id !== chrome.runtime.id || sender.tab) return;
+  if (!msg.type?.startsWith("sync:")) return;
+  const fn = syncHandlers[msg.type.slice(5)];
+  if (!fn) return;
+  Promise.resolve()
+    .then(() => fn(msg))
+    .then((data) => sendResponse({ ok: true, data: data ?? null }))
+    .catch((e) => sendResponse({ ok: false, error: { name: e.name || "Error", message: e.message } }));
   return true;
 });

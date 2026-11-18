@@ -9,6 +9,12 @@
     <h1>FB Account Switcher</h1>
   </header>
 
+  <nav id="tabs">
+    <button data-tab="accounts" class="on">Tài khoản</button>
+    <button data-tab="sync">Đồng bộ</button>
+  </nav>
+
+  <div id="tab-accounts">
   <section class="actions">
     <input id="label" type="text" placeholder="Tên gợi nhớ (tuỳ chọn)" />
     <button id="save">Lưu tài khoản hiện tại</button>
@@ -17,7 +23,11 @@
 
   <ul id="list"></ul>
   <p id="msg"></p>
+  </div>
+
+  <div id="tab-sync" hidden></div>
 
   <script src="popup.js"></script>
+  <script type="module" src="sync-ui.js"></script>
 </body>
 </html>
