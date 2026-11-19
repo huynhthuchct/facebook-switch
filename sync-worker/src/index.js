@@ -61,19 +61,9 @@ async function readJson(req) {
 const getMeta = async (env, key) =>
   (await env.DB.prepare("SELECT value FROM meta WHERE key = ?").bind(key).first())?.value ?? null;
 
-// ---- Chống dò mật khẩu ----
-async function tooManyAttempts(env, ip) {
-  const since = Date.now() - 15 * 60_000;
-  const mine = await env.DB.prepare("SELECT COUNT(*) AS c FROM attempts WHERE ip = ? AND at > ?").bind(ip, since).first();
-  const all = await env.DB.prepare("SELECT COUNT(*) AS c FROM attempts WHERE at > ?").bind(since).first();
-  return mine.c >= 5 || all.c >= 30;
-}
-async function recordFailure(env, ip) {
-  await env.DB.batch([
-    env.DB.prepare("INSERT INTO attempts (ip, at) VALUES (?, ?)").bind(ip, Date.now()),
-    env.DB.prepare("DELETE FROM attempts WHERE at < ?").bind(Date.now() - 86_400_000)
-  ]);
-}
+const validKeys = (salt, key) =>
+  typeof salt === "string" && B64U_RE.test(salt) && salt.length >= 16 && salt.length <= 64 &&
+  typeof key === "string" && B64U_RE.test(key) && key.length === 43;
 
 // ---- Xác thực phiên ----
 async function authed(req, env) {
@@ -93,7 +83,6 @@ const HOME = `<!doctype html><meta charset="utf-8"><meta name="viewport" content
 async function route(req, env) {
   const url = new URL(req.url);
   const path = url.pathname;
-  const ip = req.headers.get("cf-connecting-ip") || "unknown";
 
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
 
@@ -102,18 +91,64 @@ async function route(req, env) {
 
   if (req.method === "GET" && path === "/api/status") {
     const salt = await getMeta(env, "salt");
-    return json({ registered: !!salt, salt: salt || null });
+    const wrapped = await getMeta(env, "wrapped_key");
+    return json({ registered: !!salt, salt: salt || null, wrappedKey: wrapped ? JSON.parse(wrapped) : null });
+  }
+
+  // Đặt lại bằng mã thiết lập: thay tài khoản và bỏ ciphertext dùng khoá cũ.
+  if (req.method === "POST" && path === "/api/password/reset") {
+    if (!env.SETUP_CODE) return json({ error: "setup_code_missing" }, 503);
+    const body = await readJson(req);
+    if (typeof body.setupCode !== "string" || !(await safeEqual(body.setupCode, env.SETUP_CODE))) {
+      return json({ error: "bad_setup_code" }, 403);
+    }
+    if (body.confirmReset !== true || !validKeys(body.salt, body.authKey))
+      return json({ error: "bad_request" }, 400);
+    const hash = await sha256b64u(b64uDec(body.authKey));
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM sessions"),
+      env.DB.prepare("DELETE FROM items"),
+      env.DB.prepare("DELETE FROM meta"),
+      env.DB.prepare("INSERT INTO meta (key, value) VALUES ('salt', ?)").bind(body.salt),
+      env.DB.prepare("INSERT INTO meta (key, value) VALUES ('auth_hash', ?)").bind(hash)
+    ]);
+    return json({ ok: true });
+  }
+
+  // Đổi mật khẩu: chỉ bọc lại khoá dữ liệu, không thay ciphertext của các mục.
+  if (req.method === "POST" && path === "/api/password/change") {
+    const body = await readJson(req);
+    const stored = await getMeta(env, "auth_hash");
+    if (!stored || !validKeys(body.salt, body.authKey) ||
+        !(await safeEqual(await sha256b64u(b64uDec(body.authKey)), stored))) {
+      return json({ error: "bad_credentials" }, 401);
+    }
+    const wrapped = body.wrappedKey;
+    if (!validKeys(body.salt, body.newAuthKey) || !wrapped ||
+        typeof wrapped.iv !== "string" || !B64U_RE.test(wrapped.iv) || wrapped.iv.length !== 16 ||
+        typeof wrapped.ct !== "string" || !B64U_RE.test(wrapped.ct) || wrapped.ct.length < 64 || wrapped.ct.length > 256)
+      return json({ error: "bad_request" }, 400);
+    const hash = await sha256b64u(b64uDec(body.newAuthKey));
+    // Mọi câu lệnh cùng guard và cùng transaction D1: tránh hai lần đổi/reset ghi chéo.
+    const guard = "EXISTS (SELECT 1 FROM meta WHERE key = 'auth_hash' AND value = ?)";
+    const results = await env.DB.batch([
+      env.DB.prepare("DELETE FROM sessions WHERE " + guard).bind(stored),
+      env.DB.prepare("UPDATE meta SET value = ? WHERE key = 'salt' AND " + guard).bind(body.salt, stored),
+      env.DB.prepare("INSERT INTO meta (key, value) SELECT 'wrapped_key', ? WHERE " + guard +
+        " ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(JSON.stringify(wrapped), stored),
+      env.DB.prepare("UPDATE meta SET value = ? WHERE key = 'auth_hash' AND value = ?").bind(hash, stored)
+    ]);
+    if (results[3].meta.changes !== 1) return json({ error: "account_changed" }, 409);
+    return json({ ok: true });
   }
 
   if (req.method === "POST" && path === "/api/register") {
     const body = await readJson(req);
     if (!env.SETUP_CODE) return json({ error: "setup_code_missing" }, 503);
     if (await getMeta(env, "salt")) return json({ error: "already_registered" }, 409);
-    if (await tooManyAttempts(env, ip)) return json({ error: "too_many_attempts" }, 429);
 
     const okCode = typeof body.setupCode === "string" && (await safeEqual(body.setupCode, env.SETUP_CODE));
     if (!okCode) {
-      await recordFailure(env, ip);
       return json({ error: "bad_setup_code" }, 403);
     }
     const { salt, authKey } = body;
@@ -131,27 +166,26 @@ async function route(req, env) {
   }
 
   if (req.method === "POST" && path === "/api/login") {
-    if (await tooManyAttempts(env, ip)) return json({ error: "too_many_attempts" }, 429);
     const body = await readJson(req);
     const stored = await getMeta(env, "auth_hash");
     let ok = false;
     if (stored && typeof body.authKey === "string" && B64U_RE.test(body.authKey) && body.authKey.length === 43)
       ok = await safeEqual(await sha256b64u(b64uDec(body.authKey)), stored);
     if (!ok) {
-      await recordFailure(env, ip);
       return json({ error: "bad_credentials" }, 401);
     }
     const token = b64uEnc(crypto.getRandomValues(new Uint8Array(32)));
     const now = Date.now();
-    await env.DB.batch([
+    const loginResult = await env.DB.batch([
       env.DB.prepare("DELETE FROM sessions WHERE expires_at < ?").bind(now),
-      env.DB.prepare("INSERT INTO sessions (token_hash, expires_at) VALUES (?, ?)")
-        .bind(await sha256b64u(te.encode(token)), now + SESSION_DAYS * 86_400_000),
+      env.DB.prepare("INSERT INTO sessions (token_hash, expires_at) SELECT ?, ? WHERE EXISTS (SELECT 1 FROM meta WHERE key = 'auth_hash' AND value = ?)")
+        .bind(await sha256b64u(te.encode(token)), now + SESSION_DAYS * 86_400_000, stored),
       // Giữ tối đa MAX_SESSIONS phiên mới nhất
       env.DB.prepare(
         "DELETE FROM sessions WHERE token_hash NOT IN (SELECT token_hash FROM sessions ORDER BY expires_at DESC LIMIT ?)"
       ).bind(MAX_SESSIONS)
     ]);
+    if (loginResult[1].meta.changes !== 1) return json({ error: "account_changed" }, 409);
     return json({ token });
   }
 
@@ -181,15 +215,18 @@ async function route(req, env) {
       return json({ error: "bad_request" }, 400);
 
     const now = Date.now();
+    const tokenHash = await sha256b64u(te.encode(req.headers.get("authorization").slice(7)));
+    const activeSession = "EXISTS (SELECT 1 FROM sessions WHERE token_hash = ? AND expires_at > ?)";
     const stmt = baseRev === 0
       ? env.DB.prepare(
-          "INSERT INTO items (id, rev, iv, ct, updated_at) VALUES (?, 1, ?, ?, ?) ON CONFLICT(id) DO NOTHING"
-        ).bind(id, iv, ct, now)
+          "INSERT INTO items (id, rev, iv, ct, updated_at) SELECT ?, 1, ?, ?, ? WHERE " + activeSession + " ON CONFLICT(id) DO NOTHING"
+        ).bind(id, iv, ct, now, tokenHash, now)
       : env.DB.prepare(
-          "UPDATE items SET rev = rev + 1, iv = ?, ct = ?, updated_at = ? WHERE id = ? AND rev = ?"
-        ).bind(iv, ct, now, id, baseRev);
+          "UPDATE items SET rev = rev + 1, iv = ?, ct = ?, updated_at = ? WHERE id = ? AND rev = ? AND " + activeSession
+        ).bind(iv, ct, now, id, baseRev, tokenHash, now);
     const res = await stmt.run();
     if (res.meta.changes === 1) return json({ ok: true, rev: baseRev + 1 });
+    if (!(await authed(req, env))) return json({ error: "unauthorized" }, 401);
 
     const cur = await env.DB.prepare("SELECT rev FROM items WHERE id = ?").bind(id).first();
     return json({ error: "conflict", rev: cur?.rev ?? 0 }, 409);

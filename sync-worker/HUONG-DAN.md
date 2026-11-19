@@ -22,6 +22,8 @@ Toàn bộ chạy trên tài khoản Cloudflare **miễn phí** của bạn. M�
 
 > **macOS / Linux:** mở Terminal trong thư mục `sync-worker` rồi chạy `sh setup.sh` (thay cho `setup.bat`; các bước và kết quả giống hệt).
 
+> Khi cập nhật trên macOS/Linux, giữ lại `setup-info.txt` rồi chạy lại `sh setup.sh`. Script giữ mã thiết lập cũ và đồng bộ lại với Cloudflare. Nếu không kiểm tra được trạng thái máy chủ, script dừng và giữ nguyên file thông tin để bạn thử lại.
+
 > Nếu thấy chữ đỏ **CÓ LỖI**, đọc dòng màu vàng bên dưới, nó nói bạn cần làm gì rồi chạy lại `setup.bat` (hoặc `sh setup.sh`). Chạy lại bao nhiêu lần cũng an toàn.
 
 ## Bước 2 — Kết nối extension
@@ -53,7 +55,7 @@ Xong. Dữ liệu hiện có sẽ được tải lên ngay.
 ## Bảo mật
 
 - Ai biết địa chỉ máy chủ cũng **không đọc được gì**: dữ liệu luôn được mã hoá, và mã thiết lập chỉ dùng được **một lần**.
-- Nhập sai mật khẩu quá nhiều lần sẽ bị khoá 15 phút.
+- Không giới hạn số lần thử mật khẩu hoặc mã thiết lập; nhập sai vẫn bị từ chối. Hãy dùng mật khẩu mạnh và giữ kín mã thiết lập.
 - File `setup-info.txt` chứa mã thiết lập, **đừng chia sẻ**, và có thể xoá sau khi tạo tài khoản xong.
 
 ## Gặp sự cố?
@@ -64,7 +66,6 @@ Xong. Dữ liệu hiện có sẽ được tải lên ngay.
 | *Chưa có tên miền workers.dev* | Trang Cloudflare tự mở: đặt một tên bất kỳ, bấm Continue, rồi chạy lại `setup.bat`. |
 | *Sai mã thiết lập* | Copy lại đúng mã trong `setup-info.txt` (viết hoa, có dấu gạch ngang). |
 | *Sai mật khẩu chính* | Nhập lại đúng mật khẩu đã đặt lúc tạo tài khoản đồng bộ. |
-| *Nhập sai quá nhiều lần* | Chờ 15 phút rồi thử lại. |
 | *Không kết nối được tới máy chủ* | Kiểm tra mạng và địa chỉ (phải bắt đầu bằng `https://`). Mở thẳng địa chỉ đó trong trình duyệt, thấy chữ "Đã hoạt động" là máy chủ ổn. |
 | *Phiên đăng nhập đã hết hạn* | Vào tab Đồng bộ và nhập lại mật khẩu chính. |
 | *Không giải mã được dữ liệu trên máy chủ* | Mật khẩu chính trên máy này khác với lúc tạo tài khoản đồng bộ. Đăng xuất đồng bộ rồi đăng nhập lại bằng đúng mật khẩu. |

@@ -1,9 +1,8 @@
-name = "fb-switcher-sync"
+﻿name = "fb-switcher-sync"
 main = "src/index.js"
 compatibility_date = "2025-01-01"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "fb-switcher-sync"
-# setup.sh / setup.ps1 sẽ tự điền giá trị này
-database_id = "REPLACE_WITH_DATABASE_ID"
+database_id = "da83c2d2-3a9a-47fc-a6b0-3fda4d420bb0"

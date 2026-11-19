@@ -83,6 +83,27 @@ new_setup_code() {
   '
 }
 
+read_setup_code() {
+  [ -f "$ROOT/setup-info.txt" ] || return 0
+  node -e '
+    const text = require("fs").readFileSync(process.argv[1], "utf8");
+    const match = text.match(/^Mã thiết lập\s*:\s*([A-Z2-9]{4}(?:-[A-Z2-9]{4}){3})\s*$/m);
+    if (match) console.log(match[1]);
+  ' "$ROOT/setup-info.txt"
+}
+
+server_registered() {
+  node -e '
+    (async () => {
+      const response = await fetch(process.argv[1] + "/api/status", { signal: AbortSignal.timeout(20000) });
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      const status = await response.json();
+      if (typeof status.registered !== "boolean") throw new Error("Invalid server response");
+      console.log(status.registered ? "1" : "0");
+    })().catch(() => { process.exitCode = 1; });
+  ' "$URL"
+}
+
 # wrangler.toml được ghi lại hoàn toàn để không bao giờ bị trùng/lệch cấu hình.
 write_wrangler_toml() {
   cat >"$ROOT/wrangler.toml" <<EOF
@@ -160,25 +181,18 @@ main() {
 
   # --- 5. Mã thiết lập ---
   step 5 "Tạo mã thiết lập"
-  REGISTERED=0
-  if command -v curl >/dev/null 2>&1; then
-    sleep 3
-    STATUS=$(curl -fsS --max-time 20 "$URL/api/status" 2>/dev/null)
-    if printf '%s' "$STATUS" | grep -Eq '"registered"[[:space:]]*:[[:space:]]*true'; then
-      REGISTERED=1
-    fi
-  fi
+  REGISTERED=$(server_registered) || stop_setup "Không kiểm tra được trạng thái máy chủ." "Mã thiết lập cũ được giữ nguyên. Kiểm tra mạng rồi chạy lại: sh setup.sh"
 
-  CODE=""
-  if [ "$REGISTERED" -eq 1 ]; then
+  CODE=$(read_setup_code) || stop_setup "Không đọc được mã thiết lập cũ." "Kiểm tra quyền đọc file setup-info.txt rồi chạy lại."
+  if [ -z "$CODE" ] && [ "$REGISTERED" -eq 1 ]; then
     say "Máy chủ đã có tài khoản đồng bộ. Không cần tạo mã mới." "$C_GREEN"
   else
-    CODE=$(new_setup_code)
+    if [ -z "$CODE" ]; then CODE=$(new_setup_code); fi
     [ -n "$CODE" ] || stop_setup "Không tạo được mã thiết lập." ""
     printf '%s' "$CODE" | npx --yes wrangler@4 secret put SETUP_CODE >"$TMP_DIR/out" 2>&1
     PUT_CODE=$?
     [ "$PUT_CODE" -eq 0 ] || stop_setup "Không lưu được mã thiết lập." "$(cat "$TMP_DIR/out")"
-    say "OK: đã tạo mã thiết lập" "$C_GREEN"
+    say "OK: mã thiết lập đã được lưu và đồng bộ với máy chủ" "$C_GREEN"
   fi
 
   # --- 6. Ghi thông tin ---
@@ -199,7 +213,11 @@ main() {
     echo "1. Mở extension > tab 'Đồng bộ'."
     echo "2. Dán địa chỉ máy chủ ở trên, bấm Kết nối."
     if [ -n "$CODE" ]; then
-      echo "3. Nhập mã thiết lập và đặt MẬT KHẨU CHÍNH (quên là mất dữ liệu đã đồng bộ)."
+      if [ "$REGISTERED" -eq 0 ]; then
+        echo "3. Nhập mã thiết lập và đặt MẬT KHẨU CHÍNH (quên là mất dữ liệu đã đồng bộ)."
+      else
+        echo "3. Nhập mật khẩu chính đã đặt trước đó."
+      fi
     else
       echo "3. Nhập mật khẩu chính đã đặt trước đó."
     fi
@@ -207,6 +225,7 @@ main() {
     echo ""
     echo "Không chia sẻ file này cho ai."
   } >"$INFO"
+  chmod 600 "$INFO" 2>/dev/null || :
 
   COPIED=""
   copy_clipboard "$URL" && COPIED="   (đã copy vào clipboard)"
@@ -222,4 +241,4 @@ main() {
   say "Giờ hãy mở extension > tab 'Đồng bộ' và làm theo." "$C_YELLOW"
 }
 
-main "$@"
+if [ "${SETUP_NO_RUN:-0}" != "1" ]; then main "$@"; fi
